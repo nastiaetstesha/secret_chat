@@ -4,34 +4,45 @@ import os
 import sys
 import argparse
 import contextlib
+import logging
+from utils import (
+    build_parser,
+    setup_logging,
+    DEFAULT_HOST,
+    DEFAULT_SEND_PORT,
+    DEFAULT_TOKEN_FILE,
+)
 
-DEFAULT_HOST = "minechat.dvmn.org"
-DEFAULT_PORT = 5050
-DEFAULT_TOKEN_FILE = "minechat_token.json"
+logger = logging.getLogger("sender")
+
+# DEFAULT_HOST = "minechat.dvmn.org"
+# DEFAULT_PORT = 5050
+# DEFAULT_TOKEN_FILE = "minechat_token.json"
+
+
+async def _readline_logged(reader: asyncio.StreamReader) -> str:
+    """Читает строку и логирует её на DEBUG."""
+    data = await reader.readline()
+    text = data.decode("utf-8", errors="replace")
+    if text:
+        logger.debug(text.rstrip("\n"))
+    return text
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Send messages to minechat with token auth."
-        )
-    parser.add_argument(
-        "--host",
-        default=os.getenv("MINECHAT_HOST", DEFAULT_HOST)
-        )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.getenv("MINECHAT_SEND_PORT", DEFAULT_PORT))
+    parser = build_parser(
+        "Send messages to minechat with token auth.",
+        DEFAULT_HOST,
+        DEFAULT_SEND_PORT,
         )
     parser.add_argument(
         "--token-file",
         default=os.getenv("MINECHAT_TOKEN_FILE", DEFAULT_TOKEN_FILE),
-        help="Where to save/load token (json)."
         )
     parser.add_argument(
         "--message",
         "-m",
-        help="Message to send (empty line ends message). do not use double ' "
+        help="Message to send (empty line ends message)."
         )
     return parser.parse_args()
 
@@ -39,15 +50,19 @@ def parse_args():
 async def register_new_account(reader, writer, token_file):
     writer.write(b"\n")
     await writer.drain()
+    logger.debug("\\n  (sent)")
 
     await reader.readline()
     nickname = "PythonUser"
     writer.write(f"{nickname}\n".encode())
     await writer.drain()
+    logger.debug(f"{nickname}  (sent)")
 
     token_line = await reader.readline()
     data = json.loads(token_line.decode())
-    print("Получен новый токен:", data)
+    redacted = {**data, "account_hash": data.get("account_hash", "")[:6] + "…redacted"}
+    logger.info(f"Получен новый токен: {redacted}")
+
     with open(token_file, "w", encoding="utf-8") as f:
         json.dump(data, f)
     return data["account_hash"]
@@ -55,9 +70,9 @@ async def register_new_account(reader, writer, token_file):
 
 async def send_message(host, port, message, token_file):
     reader, writer = await asyncio.open_connection(host, port)
+    logger.info(f"Подключились к {host}:{port}")
 
-    greeting = await reader.readline()
-    print(greeting.decode().strip())
+    await _readline_logged(reader)
 
     token = None
     if os.path.exists(token_file):
@@ -66,11 +81,11 @@ async def send_message(host, port, message, token_file):
             token = data.get("account_hash")
 
     if token:
-        print("Авторизуемся по токену:", token)
+        logger.info("Авторизуемся по токену ")
         writer.write(f"{token}\n".encode())
         await writer.drain()
     else:
-        print("Регистрируем новый аккаунт…")
+        logger.info("Регистрируем новый аккаунт…")
         token = await register_new_account(reader, writer, token_file)
 
     while True:
@@ -81,15 +96,20 @@ async def send_message(host, port, message, token_file):
     text = message.rstrip("\n") + "\n\n"
     writer.write(text.encode())
     await writer.drain()
-    print("Сообщение отправлено!")
+    logger.debug("(your message)  (sent)")
+    logger.info("Сообщение отправлено!")
 
     writer.close()
     with contextlib.suppress(Exception):
         await writer.wait_closed()
+    logger.info("Соединение закрыто")
 
 
 async def amain():
     args = parse_args()
+    setup_logging(args.log_level)
+    # logging.getLogger().setLevel(args.log_level)
+
     if not args.message:
         print("Нужно указать сообщение через --message")
         return
