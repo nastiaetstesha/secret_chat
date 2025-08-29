@@ -139,3 +139,4 @@ dmypy.json
 .pytype/
 chat_messages.txt
 chat_history.txt
+minechat_token.json
