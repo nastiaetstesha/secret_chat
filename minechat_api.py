@@ -13,6 +13,28 @@ async def _readline_text(reader: asyncio.StreamReader) -> str:
     return data.decode("utf-8", errors="replace").rstrip("\n")
 
 
+def _escape_control(text: str) -> str:
+    """
+    Делает данные безопасными для протокола «1 сообщение = 1 строка».
+    Стратегия:
+      - реальные управляющие - печатимые escape-последовательности
+        \n -> \\n, \t - \\t
+      - удаляем NUL и прочие непечатимые управляющие
+    """
+    if text is None:
+        return ""
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\\", "\\\\")
+    text = text.replace("\n", r"\n")
+    text = text.replace("\t", r"\t")
+    cleaned = []
+    for ch in text:
+        if ch == "\\" or ch.isprintable():
+            cleaned.append(ch)
+    return "".join(cleaned)
+
+
 async def register(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, nickname: str) -> dict:
     """
     Регистрация нового пользователя.
@@ -75,10 +97,11 @@ async def authorise(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, 
 
 async def submit_message(writer: asyncio.StreamWriter, text: str) -> None:
     """
-    Отправляет сообщение. По протоколу каждое сообщение заканчивается пустой строкой.
+    Отправляет сообщение как одну логическую строку.
+    Реальные переводы строк и табы превращаются в видимые \\n и \\t.
     """
-    # тело + \n + \n
-    body = text.rstrip("\n") + "\n\n"
+    safe = _escape_control(text)
+    body = safe + "\n\n"
     writer.write(body.encode("utf-8"))
     await writer.drain()
     logger.debug("(message sent)")
