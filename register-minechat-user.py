@@ -11,6 +11,8 @@ from utils import (
     DEFAULT_SEND_PORT,
     expand_path_and_mkdirs,
 )
+from minechat_api import register as mc_register
+
 
 logger = logging.getLogger("registrar")
 
@@ -42,45 +44,45 @@ def parse_args():
     return parser.parse_args()
 
 
-async def register_and_save(host: str, port: int, nickname_prefix: str, token_file: str):
-    reader = writer = None
-    try:
-        logger.info(f"Подключаемся к {host}:{port}")
-        reader, writer = await asyncio.open_connection(host, port)
+# async def register_and_save(host: str, port: int, nickname_prefix: str, token_file: str):
+#     reader = writer = None
+#     try:
+#         logger.info(f"Подключаемся к {host}:{port}")
+#         reader, writer = await asyncio.open_connection(host, port)
 
-        greet = await reader.readline()
-        logger.debug(greet.decode(errors="replace").rstrip("\n"))
+#         greet = await reader.readline()
+#         logger.debug(greet.decode(errors="replace").rstrip("\n"))
 
-        writer.write(b"\n")
-        await writer.drain()
-        logger.debug("\\n  (sent)")
+#         writer.write(b"\n")
+#         await writer.drain()
+#         logger.debug("\\n  (sent)")
 
-        req_nick = await reader.readline()
-        logger.debug(req_nick.decode(errors="replace").rstrip("\n"))
+#         req_nick = await reader.readline()
+#         logger.debug(req_nick.decode(errors="replace").rstrip("\n"))
 
-        nickname = f"{nickname_prefix}"
-        writer.write(f"{nickname}\n".encode("utf-8"))
-        await writer.drain()
-        logger.debug(f"{nickname}  (sent)")
+#         nickname = f"{nickname_prefix}"
+#         writer.write(f"{nickname}\n".encode("utf-8"))
+#         await writer.drain()
+#         logger.debug(f"{nickname}  (sent)")
 
-        token_line = await reader.readline()
-        token_text = token_line.decode("utf-8", errors="replace").strip()
-        logger.debug(token_text)
+#         token_line = await reader.readline()
+#         token_text = token_line.decode("utf-8", errors="replace").strip()
+#         logger.debug(token_text)
 
-        data = json.loads(token_text)
-        print(json.dumps(data, ensure_ascii=False, indent=4))
+#         data = json.loads(token_text)
+#         print(json.dumps(data, ensure_ascii=False, indent=4))
 
-        token_path = expand_path_and_mkdirs(token_file)
-        with open(token_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        logger.info(f"Токен сохранён: {token_path}")
+#         token_path = expand_path_and_mkdirs(token_file)
+#         with open(token_path, "w", encoding="utf-8") as f:
+#             json.dump(data, f, ensure_ascii=False)
+#         logger.info(f"Токен сохранён: {token_path}")
 
-    finally:
-        if writer is not None:
-            with contextlib.suppress(Exception):
-                writer.close()
-                await writer.wait_closed()
-            logger.info("Соединение закрыто")
+#     finally:
+#         if writer is not None:
+#             with contextlib.suppress(Exception):
+#                 writer.close()
+#                 await writer.wait_closed()
+#             logger.info("Соединение закрыто")
 
 
 async def amain():
@@ -89,19 +91,27 @@ async def amain():
 
     token_path = os.path.expanduser(args.token_file)
     if os.path.exists(token_path) and not args.force:
-        logger.warning(
-            f"Файл токена уже существует: {token_path}. "
-            f"Добавьте --force для перезаписи или укажите другой --token-file."
-        )
+        logger.warning(f"Файл уже существует: {token_path}. Используйте --force для перезаписи.")
         print(token_path)
         return
 
-    await register_and_save(
-        host=args.host,
-        port=args.port,
-        nickname_prefix=args.nickname,
-        token_file=args.token_file,
-    )
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.open_connection(args.host, args.port)
+        token_data = await mc_register(reader, writer, args.nickname)
+        print(json.dumps(token_data, ensure_ascii=False, indent=4))
+
+        token_path = expand_path_and_mkdirs(args.token_file)
+
+        with open(token_path, "w", encoding="utf-8") as f:
+            json.dump(token_data, f, ensure_ascii=False)
+        logger.info(f"Токен сохранён: {token_path}")
+
+    finally:
+        if writer:
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
 
 
 if __name__ == "__main__":

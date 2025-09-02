@@ -13,6 +13,8 @@ from utils import (
     DEFAULT_SEND_PORT,
     DEFAULT_TOKEN_FILE,
 )
+from minechat_api import authorise as mc_authorise, submit_message as mc_submit
+
 
 logger = logging.getLogger("sender")
 
@@ -21,13 +23,13 @@ logger = logging.getLogger("sender")
 # DEFAULT_TOKEN_FILE = "minechat_token.json"
 
 
-async def _readline_logged(reader: asyncio.StreamReader) -> str:
-    """Читает строку и логирует её на DEBUG."""
-    data = await reader.readline()
-    text = data.decode("utf-8", errors="replace")
-    if text:
-        logger.debug(text.rstrip("\n"))
-    return text
+# async def _readline_logged(reader: asyncio.StreamReader) -> str:
+#     """Читает строку и логирует её на DEBUG."""
+#     data = await reader.readline()
+#     text = data.decode("utf-8", errors="replace")
+#     if text:
+#         logger.debug(text.rstrip("\n"))
+#     return text
 
 
 def parse_args():
@@ -36,119 +38,127 @@ def parse_args():
         DEFAULT_HOST,
         DEFAULT_SEND_PORT,
         )
-    # parser.add_argument(
-    #     "--nickname",
-    #     default="anonymous",
-    #     help="Префикс ника при регистрации (к нему сервер может добавить прилагательное).",
-    # )
     parser.add_argument(
         "--token-file",
         default=os.getenv("MINECHAT_TOKEN_FILE", DEFAULT_TOKEN_FILE),
         )
-    # parser.add_argument(
-    #     "--force",
-    #     action="store_true",
-    #     help="Перезаписать существующий файл токена.",
-    # )
     parser.add_argument(
         "--message",
         "-m",
+        required=True,
         help="Message to send (empty line ends message)."
         )
     return parser.parse_args()
 
 
-async def register_new_account(reader, writer, token_file):
-    writer.write(b"\n")
-    await writer.drain()
-    logger.debug("\\n  (sent)")
+# async def register_new_account(reader, writer, token_file):
+#     writer.write(b"\n")
+#     await writer.drain()
+#     logger.debug("\\n  (sent)")
 
-    await reader.readline()
-    nickname = "PythonUser"
-    writer.write(f"{nickname}\n".encode())
-    await writer.drain()
-    logger.debug(f"{nickname}  (sent)")
+#     await reader.readline()
+#     nickname = "PythonUser"
+#     writer.write(f"{nickname}\n".encode())
+#     await writer.drain()
+#     logger.debug(f"{nickname}  (sent)")
 
-    token_line = await reader.readline()
-    data = json.loads(token_line.decode())
-    redacted = {**data, "account_hash": data.get("account_hash", "")[:6] + "…redacted"}
-    logger.info(f"Получен новый токен: {redacted}")
-    token_file = expand_path_and_mkdirs(token_file)
+#     token_line = await reader.readline()
+#     data = json.loads(token_line.decode())
+#     redacted = {**data, "account_hash": data.get("account_hash", "")[:6] + "…redacted"}
+#     logger.info(f"Получен новый токен: {redacted}")
+#     token_file = expand_path_and_mkdirs(token_file)
 
-    with open(token_file, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    return data["account_hash"]
+#     with open(token_file, "w", encoding="utf-8") as f:
+#         json.dump(data, f)
+#     return data["account_hash"]
 
 
-async def send_message(host, port, message, token_file):
-    try:
-        reader, writer = await asyncio.open_connection(host, port)
-        logger.info(f"Подключились к {host}:{port}")
+# async def send_message(host, port, message, token_file):
+#     try:
+#         reader, writer = await asyncio.open_connection(host, port)
+#         logger.info(f"Подключились к {host}:{port}")
 
-        await _readline_logged(reader)
-        token_path = os.path.expanduser(token_file)
-        logger.info(f"Ищем токен в: {token_path}")
+#         await _readline_logged(reader)
+#         token_path = os.path.expanduser(token_file)
+#         logger.info(f"Ищем токен в: {token_path}")
 
-        token = None
-        if os.path.exists(token_path):
-            with open(token_path, encoding="utf-8") as f:
-                data = json.load(f)
-                token = data.get("account_hash")
+#         token = None
+#         if os.path.exists(token_path):
+#             with open(token_path, encoding="utf-8") as f:
+#                 data = json.load(f)
+#                 token = data.get("account_hash")
 
-        if token:
-            logger.info("Авторизуемся по токену ")
-            writer.write(f"{token}\n".encode())
-            await writer.drain()
-            response_line = await reader.readline()
-            response_text = response_line.decode().strip()
-            try:
-                response_json = json.loads(response_text)
-            except json.JSONDecodeError:
-                response_json = None
+#         if token:
+#             logger.info("Авторизуемся по токену ")
+#             writer.write(f"{token}\n".encode())
+#             await writer.drain()
+#             response_line = await reader.readline()
+#             response_text = response_line.decode().strip()
+#             try:
+#                 response_json = json.loads(response_text)
+#             except json.JSONDecodeError:
+#                 response_json = None
 
-            if response_json is None:
-                print("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
-                logger.error("Сервер отверг токен.")
-                writer.close()
-                with contextlib.suppress(Exception):
-                    await writer.wait_closed()
-                return
-        else:
-            logger.info("Регистрируем новый аккаунт…")
-            token = await register_new_account(reader, writer, token_path)
+#             if response_json is None:
+#                 print("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
+#                 logger.error("Сервер отверг токен.")
+#                 writer.close()
+#                 with contextlib.suppress(Exception):
+#                     await writer.wait_closed()
+#                 return
+#         else:
+#             logger.info("Регистрируем новый аккаунт…")
+#             token = await register_new_account(reader, writer, token_path)
 
-        while True:
-            line = await reader.readline()
-            if not line or line.decode().startswith("Welcome"):
-                break
+#         while True:
+#             line = await reader.readline()
+#             if not line or line.decode().startswith("Welcome"):
+#                 break
 
-        text = message.rstrip("\n") + "\n\n"
-        writer.write(text.encode())
-        await writer.drain()
-        logger.debug("(your message)  (sent)")
-        logger.info("Сообщение отправлено!")
+#         text = message.rstrip("\n") + "\n\n"
+#         writer.write(text.encode())
+#         await writer.drain()
+#         logger.debug("(your message)  (sent)")
+#         logger.info("Сообщение отправлено!")
 
-        # writer.close()
-        # with contextlib.suppress(Exception):
-        #     await writer.wait_closed()
-        # logger.info("Соединение закрыто")
-    finally:
-        if writer is not None:
-            with contextlib.suppress(Exception):
-                writer.close()
-                await writer.wait_closed()
-            logger.info("Соединение закрыто")
+#     finally:
+#         if writer is not None:
+#             with contextlib.suppress(Exception):
+#                 writer.close()
+#                 await writer.wait_closed()
+#             logger.info("Соединение закрыто")
 
 
 async def amain():
     args = parse_args()
     setup_logging(args.log_level)
-    # logging.getLogger().setLevel(args.log_level)
 
-    if not args.message:
-        print("Нужно указать сообщение через --message")
+    token_path = os.path.expanduser(args.token_file)
+    if not os.path.exists(token_path):
+        print("Токен не найден. Сначала зарегистрируйтесь (register-minechat-user.py).")
         return
-    await send_message(args.host, args.port, args.message, args.token_file)
+
+    with open(token_path, encoding="utf-8") as f:
+        data = json.load(f)
+        token = data.get("account_hash")
+
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.open_connection(args.host, args.port)
+        ok = await mc_authorise(reader, writer, token)
+        if not ok:
+            print("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
+            return
+
+        # сервер обычно присылает Welcome/подсказки — можно дочитать пару строк, но это опционально
+        # отправляем сообщение
+        await mc_submit(writer, args.message)
+        logger.info("Сообщение отправлено!")
+    finally:
+        if writer:
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
 
 
 if __name__ == "__main__":

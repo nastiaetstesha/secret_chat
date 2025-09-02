@@ -53,3 +53,71 @@ history = ~/minechat.history
 И подменить что-то на лету:
 
 `python3 listen-minechat.py --config ~/.minechat.conf --history ./today.history`
+
+## Все доступные CLI-команды и аргументы
+
+
+`listen-minechat.py` — слушатель чата;
+
+`register-minechat-user.py` — регистрация нового пользователя;
+
+`send-minechat-auth.py` — отправка сообщений.
+
+### 1. Слушатель чата
+`python3 listen-minechat.py [OPTIONS]`
+Аргументы и переменные окружения:
+
+
+#### `--config PATH`	–	путь к ini-файлу конфигурации (работает только если установлен configargparse)	~/.minechat.conf, ./minechat.conf
+#### `--host HOST`	MINECHAT_HOST	адрес сервера чата	minechat.dvmn.org
+#### `--port PORT`	MINECHAT_PORT	порт сервера чата	5000
+#### `--history FILE`	MINECHAT_HISTORY	путь к файлу истории сообщений	chat_history.txt
+#### `--log-level LEVEL`	MINECHAT_LOG_LEVEL	уровень логирования	DEBUG
+### Примеры:
+```
+python3 listen-minechat.py
+python3 listen-minechat.py --history ./today.history
+python3 listen-minechat.py --host minechat.dvmn.org --port 5000 --log-level INFO
+python3 listen-minechat.py --config ~/.minechat.conf
+```
+### Регистрация пользователя
+`python3 register-minechat-user.py [OPTIONS]`
+
+
+Аргументы и ENV:
+
+
+#### `--host HOST`	MINECHAT_HOST	адрес сервера чата	minechat.dvmn.org
+#### `--port PORT`	MINECHAT_PORT	порт сервера чата (отправка)	5050
+#### `--nickname NAME`	–	префикс ника (сервер добавит эпитет)	"anonymous"
+#### `--token-file FILE`	MINECHAT_TOKEN_FILE	путь для сохранения токена	./minechat_token.json (в директории проекта)
+#### `--force`	–	перезаписать существующий токен	False
+#### `--log-level` LEVEL	MINECHAT_LOG_LEVEL	уровень логирования	DEBUG
+
+### Примеры:
+```
+python3 register-minechat-user.py
+python3 register-minechat-user.py --nickname egor
+python3 register-minechat-user.py --token-file ./secrets/token.json
+python3 register-minechat-user.py --force --log-level INFO
+```
+### Отправка сообщений
+`python3 send-minechat-auth.py [OPTIONS] --message "TEXT"`
+
+
+Аргументы и ENV:
+
+#### `--host HOST`	MINECHAT_HOST	адрес сервера чата	minechat.dvmn.org
+#### `--port PORT`	MINECHAT_PORT	порт сервера чата (отправка)	5050
+#### `--token-file` FILE	MINECHAT_TOKEN_FILE	путь к файлу с токеном	./minechat_token.json
+#### `--message`, -m TEXT	–	текст сообщения (обязательно)	–
+#### -`-log-level` LEVEL	MINECHAT_LOG_LEVEL	уровень логирования	DEBUG
+
+#### Примеры:
+```
+python3 send-minechat-auth.py -m 'Привет всем'
+python3 send-minechat-auth.py --message 'Это я со старым токеном'
+python3 send-minechat-auth.py --token-file ./secrets/token.json -m 'Секретное сообщение'
+python3 send-minechat-auth.py --host minechat.dvmn.org --port 5050 -m 'Через другой порт'
+python3 send-minechat-auth.py --log-level INFO -m 'Меньше логов'
+```
