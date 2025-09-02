@@ -36,10 +36,20 @@ def parse_args():
         DEFAULT_HOST,
         DEFAULT_SEND_PORT,
         )
+    # parser.add_argument(
+    #     "--nickname",
+    #     default="anonymous",
+    #     help="Префикс ника при регистрации (к нему сервер может добавить прилагательное).",
+    # )
     parser.add_argument(
         "--token-file",
         default=os.getenv("MINECHAT_TOKEN_FILE", DEFAULT_TOKEN_FILE),
         )
+    # parser.add_argument(
+    #     "--force",
+    #     action="store_true",
+    #     help="Перезаписать существующий файл токена.",
+    # )
     parser.add_argument(
         "--message",
         "-m",
