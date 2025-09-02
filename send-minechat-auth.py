@@ -8,6 +8,7 @@ import logging
 from utils import (
     build_parser,
     setup_logging,
+    expand_path_and_mkdirs,
     DEFAULT_HOST,
     DEFAULT_SEND_PORT,
     DEFAULT_TOKEN_FILE,
@@ -62,6 +63,7 @@ async def register_new_account(reader, writer, token_file):
     data = json.loads(token_line.decode())
     redacted = {**data, "account_hash": data.get("account_hash", "")[:6] + "…redacted"}
     logger.info(f"Получен новый токен: {redacted}")
+    token_file = expand_path_and_mkdirs(token_file)
 
     with open(token_file, "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -69,40 +71,63 @@ async def register_new_account(reader, writer, token_file):
 
 
 async def send_message(host, port, message, token_file):
-    reader, writer = await asyncio.open_connection(host, port)
-    logger.info(f"Подключились к {host}:{port}")
+    try:
+        reader, writer = await asyncio.open_connection(host, port)
+        logger.info(f"Подключились к {host}:{port}")
 
-    await _readline_logged(reader)
+        await _readline_logged(reader)
+        token_path = os.path.expanduser(token_file)
+        logger.info(f"Ищем токен в: {token_path}")
 
-    token = None
-    if os.path.exists(token_file):
-        with open(token_file, encoding="utf-8") as f:
-            data = json.load(f)
-            token = data.get("account_hash")
+        token = None
+        if os.path.exists(token_path):
+            with open(token_path, encoding="utf-8") as f:
+                data = json.load(f)
+                token = data.get("account_hash")
 
-    if token:
-        logger.info("Авторизуемся по токену ")
-        writer.write(f"{token}\n".encode())
+        if token:
+            logger.info("Авторизуемся по токену ")
+            writer.write(f"{token}\n".encode())
+            await writer.drain()
+            response_line = await reader.readline()
+            response_text = response_line.decode().strip()
+            try:
+                response_json = json.loads(response_text)
+            except json.JSONDecodeError:
+                response_json = None
+
+            if response_json is None:
+                print("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
+                logger.error("Сервер отверг токен.")
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+                return
+        else:
+            logger.info("Регистрируем новый аккаунт…")
+            token = await register_new_account(reader, writer, token_path)
+
+        while True:
+            line = await reader.readline()
+            if not line or line.decode().startswith("Welcome"):
+                break
+
+        text = message.rstrip("\n") + "\n\n"
+        writer.write(text.encode())
         await writer.drain()
-    else:
-        logger.info("Регистрируем новый аккаунт…")
-        token = await register_new_account(reader, writer, token_file)
+        logger.debug("(your message)  (sent)")
+        logger.info("Сообщение отправлено!")
 
-    while True:
-        line = await reader.readline()
-        if not line or line.decode().startswith("Welcome"):
-            break
-
-    text = message.rstrip("\n") + "\n\n"
-    writer.write(text.encode())
-    await writer.drain()
-    logger.debug("(your message)  (sent)")
-    logger.info("Сообщение отправлено!")
-
-    writer.close()
-    with contextlib.suppress(Exception):
-        await writer.wait_closed()
-    logger.info("Соединение закрыто")
+        # writer.close()
+        # with contextlib.suppress(Exception):
+        #     await writer.wait_closed()
+        # logger.info("Соединение закрыто")
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
+            logger.info("Соединение закрыто")
 
 
 async def amain():

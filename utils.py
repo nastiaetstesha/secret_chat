@@ -7,6 +7,7 @@ DEFAULT_LISTEN_PORT = 5000
 DEFAULT_SEND_PORT = 5050
 DEFAULT_HISTORY = "chat_history.txt"
 DEFAULT_TOKEN_FILE = "minechat_token.json"
+# DEFAULT_TOKEN_FILE = os.path.expanduser("~/.config/minechat/token.json")
 RECONNECT_DELAY_START = 2
 RECONNECT_DELAY_MAX = 60
 
@@ -16,6 +17,15 @@ def setup_logging(level: str = "DEBUG"):
         level=getattr(logging, level, logging.DEBUG),
         format="%(levelname)s:%(name)s:%(message)s",
     )
+
+
+def expand_path_and_mkdirs(path: str) -> str:
+    """Раскрывает ~ и создаёт родительскую папку, если её нет."""
+    full = os.path.expanduser(path)
+    parent = os.path.dirname(full)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    return full
 
 
 try:
