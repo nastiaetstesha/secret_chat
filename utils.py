@@ -7,7 +7,6 @@ DEFAULT_LISTEN_PORT = 5000
 DEFAULT_SEND_PORT = 5050
 DEFAULT_HISTORY = "chat_history.txt"
 DEFAULT_TOKEN_FILE = "minechat_token.json"
-# DEFAULT_TOKEN_FILE = os.path.expanduser("~/.config/minechat/token.json")
 RECONNECT_DELAY_START = 2
 RECONNECT_DELAY_MAX = 60
 

@@ -18,13 +18,6 @@ from utils import (
 )
 
 
-# DEFAULT_HOST = "minechat.dvmn.org"
-# DEFAULT_PORT = 5000
-# DEFAULT_HISTORY = "chat_history.txt"
-
-# RECONNECT_DELAY_START = 2
-# RECONNECT_DELAY_MAX = 60
-
 logger = logging.getLogger("listener")
 
 
@@ -121,7 +114,6 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
 async def amain():
     args = parse_args()
     setup_logging(args.log_level)
-    # logging.getLogger().setLevel(args.log_level)
 
     host: str = args.host
     port: int = args.port
