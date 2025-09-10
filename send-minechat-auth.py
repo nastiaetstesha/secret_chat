@@ -33,6 +33,7 @@ def parse_args():
         required=True,
         help="Message to send (empty line ends message)."
         )
+    
     return parser.parse_args()
 
 

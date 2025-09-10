@@ -15,6 +15,7 @@ from utils import (
     DEFAULT_HOST,
     DEFAULT_LISTEN_PORT,
     DEFAULT_HISTORY,
+    DEFAULT_SEND_PORT,
     RECONNECT_DELAY_START,
     RECONNECT_DELAY_MAX,
 )
@@ -33,7 +34,12 @@ def parse_args():
         default=os.getenv("MINECHAT_HISTORY", DEFAULT_HISTORY),
         help="Путь к файлу истории (ENV: MINECHAT_HISTORY)",
         )
-    
+    parser.add_argument(
+        "--send-port",
+        type=int,
+        default=int(os.getenv("MINECHAT_SEND_PORT", DEFAULT_SEND_PORT)),
+        help="Порт для отправки сообщений (ENV: MINECHAT_SEND_PORT)",
+        )
     return parser.parse_args()
 
 
@@ -125,6 +131,30 @@ async def read_msgs(host: str, port: int, gui_queue: asyncio.Queue, save_queue: 
         delay = min(delay * 2, RECONNECT_DELAY_MAX)
 
 
+async def send_msgs(host: str, port: int, queue: asyncio.Queue,
+                    status_queue: asyncio.Queue | None = None):
+    """
+    Пока что «заглушка отправки»: читает пользовательский ввод из очереди
+    и печатает в терминал. Сеть не трогаем.
+    """
+
+    if status_queue:
+        await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
+        await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
+
+    try:
+        while True:
+            text = await queue.get()
+            text = (text or "").strip()
+            if not text:
+                continue
+            print(f"Пользователь написал: {text}")
+            # позже здесь будет отправка в сокет и обработка протокола
+    except asyncio.CancelledError:
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+        raise
+
 async def main():
     args = parse_args()
     setup_logging(args.log_level)
@@ -141,14 +171,15 @@ async def main():
     gui_task = asyncio.create_task(gui.draw(messages_queue, sending_queue, status_updates_queue))
     reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_updates_queue))
     saver_task = asyncio.create_task(save_messages(history_path, save_queue))
+    sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, status_updates_queue))
 
     try:
-        await asyncio.gather(gui_task, reader_task, saver_task)
+        await asyncio.gather(gui_task, reader_task, saver_task, sender_task)
     except gui.TkAppClosed:
-        for t in (reader_task, saver_task):
+        for t in (reader_task, saver_task, sender_task):
             t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reader_task, saver_task)
+            await asyncio.gather(reader_task, saver_task, sender_task)
 
 
 if __name__ == "__main__":
