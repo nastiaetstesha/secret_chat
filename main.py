@@ -1,13 +1,20 @@
 import asyncio
 import contextlib
 import logging
+import os
+import datetime as dt
+
+import aiofiles
 
 import gui
+
 from utils import (
     build_parser,
     setup_logging,
+    expand_path_and_mkdirs,
     DEFAULT_HOST,
     DEFAULT_LISTEN_PORT,
+    DEFAULT_HISTORY,
     RECONNECT_DELAY_START,
     RECONNECT_DELAY_MAX,
 )
@@ -16,26 +23,79 @@ logger = logging.getLogger("runner")
 
 
 def parse_args():
-    return build_parser(
-        "Run minechat GUI that listens chat messages.",
+    parser = build_parser(
+        "Run minechat GUI with history persistence.",
         DEFAULT_HOST,
         DEFAULT_LISTEN_PORT,
-    ).parse_args()
+    )
+    parser.add_argument(
+        "--history",
+        default=os.getenv("MINECHAT_HISTORY", DEFAULT_HISTORY),
+        help="Путь к файлу истории (ENV: MINECHAT_HISTORY)",
+        )
+    
+    return parser.parse_args()
 
 
-async def read_msgs(host: str, port: int, queue: asyncio.Queue):
+def _now_ts() -> str:
+    """Отметка времени как в консольном клиенте: [DD.MM.YY HH:MM]."""
+    return dt.datetime.now().strftime("[%d.%m.%y %H:%M]")
+
+
+async def preload_history(filepath: str, messages_queue: asyncio.Queue):
+    """Загружает историю из файла и отправляет строки в GUI-очередь."""
+    path = os.path.expanduser(filepath)
+    if not os.path.exists(path):
+        return
+
+    try:
+        async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
+            async for line in f:
+                await messages_queue.put(line.rstrip("\n"))
+        logger.info("История загружена из %s", path)
+    except Exception as e:
+        logger.warning("Не удалось загрузить историю %s: %s", path, e)
+
+
+async def save_messages(filepath: str, queue: asyncio.Queue):
+    """
+    Асинхронно пишет новые сообщения в файл истории.
+    Ожидает строки в очереди; каждую строку дописывает с таймстемпом.
+    """
+    path = expand_path_and_mkdirs(filepath)
+    try:
+        async with aiofiles.open(path, mode="a", encoding="utf-8") as f:
+            while True:
+                msg = await queue.get()
+                stamped = f"{_now_ts()} {msg.rstrip()}"
+                await f.write(stamped + "\n")
+                await f.flush()
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.exception("Ошибка записи истории в %s: %s", path, e)
+
+
+async def read_msgs(host: str, port: int, gui_queue: asyncio.Queue, save_queue: asyncio.Queue,
+                    status_queue: asyncio.Queue | None = None):
     """
     Подключается к серверу и непрерывно читает чат.
-    Каждую полученную строку помещает в messages_queue.
-    Умеет переподключаться с экспоненциальной паузой.
+    Каждую строку отправляет в GUI и в очередь сохранения.
+    Переподключается с экспоненциальной паузой.
     """
     delay = RECONNECT_DELAY_START
 
     while True:
         reader = writer = None
         try:
+            if status_queue:
+                await status_queue.put(gui.ReadConnectionStateChanged.INITIATED)
+
             reader, writer = await asyncio.open_connection(host, port)
             logger.info("Подключились к %s:%s", host, port)
+            if status_queue:
+                await status_queue.put(gui.ReadConnectionStateChanged.ESTABLISHED)
+
             delay = RECONNECT_DELAY_START
 
             while True:
@@ -44,13 +104,17 @@ async def read_msgs(host: str, port: int, queue: asyncio.Queue):
                     logger.info("Сервер закрыл соединение")
                     break
                 text = line.decode("utf-8", errors="replace").rstrip("\n")
-                await queue.put(text)
+
+                await gui_queue.put(text)
+                await save_queue.put(text)
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.exception("Ошибка чтения: %s", e)
         finally:
+            if status_queue:
+                await status_queue.put(gui.ReadConnectionStateChanged.CLOSED)
             if writer:
                 with contextlib.suppress(Exception):
                     writer.close()
@@ -68,22 +132,23 @@ async def main():
     messages_queue = asyncio.Queue()
     sending_queue = asyncio.Queue()
     status_updates_queue = asyncio.Queue()
+    save_queue = asyncio.Queue()
 
-    await messages_queue.put("GUI: подключаюсь к чату…")
+    history_path = expand_path_and_mkdirs(args.history)
 
-    gui_task = asyncio.create_task(
-        gui.draw(messages_queue, sending_queue, status_updates_queue)
-    )
-    reader_task = asyncio.create_task(
-        read_msgs(args.host, args.port, messages_queue)
-    )
+    await preload_history(history_path, messages_queue)
+
+    gui_task = asyncio.create_task(gui.draw(messages_queue, sending_queue, status_updates_queue))
+    reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_updates_queue))
+    saver_task = asyncio.create_task(save_messages(history_path, save_queue))
 
     try:
-        await asyncio.gather(gui_task, reader_task)
+        await asyncio.gather(gui_task, reader_task, saver_task)
     except gui.TkAppClosed:
-        reader_task.cancel()
+        for t in (reader_task, saver_task):
+            t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await reader_task
+            await asyncio.gather(reader_task, saver_task)
 
 
 if __name__ == "__main__":
