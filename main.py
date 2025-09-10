@@ -21,6 +21,10 @@ from utils import (
     RECONNECT_DELAY_MAX,
     DEFAULT_TOKEN_FILE
 )
+from minechat_api import (
+    authorise as mc_authorise,
+    submit_message as mc_submit
+)
 
 logger = logging.getLogger("runner")
 
@@ -139,28 +143,69 @@ async def read_msgs(host: str, port: int, gui_queue: asyncio.Queue, save_queue: 
 
 
 async def send_msgs(host: str, port: int, queue: asyncio.Queue,
-                    status_queue: asyncio.Queue | None = None):
+                    token_file: str, status_queue: asyncio.Queue | None = None):
     """
-    Пока что «заглушка отправки»: читает пользовательский ввод из очереди
-    и печатает в терминал. Сеть не трогаем.
+    Реальная отправка: держим соединение на порту отправки,
+    авторизуемся токеном и шлём каждую строку из очереди.
+    Переподключаемся при сбоях с экспоненциальной задержкой.
     """
-
-    if status_queue:
-        await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
-        await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
-
+    token_path = os.path.expanduser(token_file)
+    if not os.path.exists(token_path):
+        print("Токен не найден. Сначала зарегистрируйтесь (register-minechat-user.py).")
+        return
     try:
-        while True:
-            text = await queue.get()
-            text = (text or "").strip()
-            if not text:
-                continue
-            print(f"Пользователь написал: {text}")
-            # позже здесь отправка в сокет и обработка протокола
-    except asyncio.CancelledError:
-        if status_queue:
-            await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
-        raise
+        with open(token_path, encoding="utf-8") as f:
+            token = json.load(f).get("account_hash")
+    except Exception as e:
+        print(f"Не удалось прочитать токен из {token_path}: {e}")
+        return
+
+    delay = RECONNECT_DELAY_START
+    while True:
+        reader = writer = None
+        try:
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
+
+            reader, writer = await asyncio.open_connection(host, port)
+            ok = await mc_authorise(reader, writer, token)
+            if not ok:
+                print("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
+                if status_queue:
+                    await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+                return
+
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
+            delay = RECONNECT_DELAY_START
+
+            while True:
+                text = (await queue.get() or "").strip()
+                if not text:
+                    continue
+                await mc_submit(writer, text)
+                logger.info("Отправлено на сервер: %r", text)
+
+        except asyncio.CancelledError:
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+            if writer:
+                with contextlib.suppress(Exception):
+                    writer.close()
+                    await writer.wait_closed()
+            raise
+        except Exception as e:
+            logger.exception("Ошибка отправки: %s", e)
+        finally:
+            if writer:
+                with contextlib.suppress(Exception):
+                    writer.close()
+                    await writer.wait_closed()
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, RECONNECT_DELAY_MAX)
 
 
 async def _readline_text(reader: asyncio.StreamReader) -> str:
@@ -239,7 +284,7 @@ async def main():
     gui_task = asyncio.create_task(gui.draw(messages_queue, sending_queue, status_updates_queue))
     reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_updates_queue))
     saver_task = asyncio.create_task(save_messages(history_path, save_queue))
-    sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, status_updates_queue))
+    sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, args.token_file, status_updates_queue))
     auth_task = asyncio.create_task(authorise_and_report(args.host, args.send_port, args.token_file, status_updates_queue))
 
     try:
