@@ -3,6 +3,7 @@ import contextlib
 import logging
 import os
 import datetime as dt
+import json
 
 import aiofiles
 
@@ -18,6 +19,7 @@ from utils import (
     DEFAULT_SEND_PORT,
     RECONNECT_DELAY_START,
     RECONNECT_DELAY_MAX,
+    DEFAULT_TOKEN_FILE
 )
 
 logger = logging.getLogger("runner")
@@ -39,6 +41,11 @@ def parse_args():
         type=int,
         default=int(os.getenv("MINECHAT_SEND_PORT", DEFAULT_SEND_PORT)),
         help="Порт для отправки сообщений (ENV: MINECHAT_SEND_PORT)",
+        )
+    parser.add_argument(
+        "--token-file",
+        default=os.getenv("MINECHAT_TOKEN_FILE", DEFAULT_TOKEN_FILE),
+        help="Путь к файлу токена (ENV: MINECHAT_TOKEN_FILE)",
         )
     return parser.parse_args()
 
@@ -149,11 +156,72 @@ async def send_msgs(host: str, port: int, queue: asyncio.Queue,
             if not text:
                 continue
             print(f"Пользователь написал: {text}")
-            # позже здесь будет отправка в сокет и обработка протокола
+            # позже здесь отправка в сокет и обработка протокола
     except asyncio.CancelledError:
         if status_queue:
             await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
         raise
+
+
+async def _readline_text(reader: asyncio.StreamReader) -> str:
+    data = await reader.readline()
+    if not data:
+        return ""
+    return data.decode("utf-8", errors="replace").rstrip("\n")
+
+
+async def authorise_and_report(host: str, port: int, token_file: str,
+                               status_queue: asyncio.Queue | None = None) -> bool:
+    token_path = os.path.expanduser(token_file)
+    if not os.path.exists(token_path):
+        print("Токен не найден. Сначала зарегистрируйтесь (register-minechat-user.py).")
+        return False
+
+    try:
+        with open(token_path, encoding="utf-8") as f:
+            token = json.load(f).get("account_hash")
+    except Exception as e:
+        print(f"Не удалось прочитать токен из {token_path}: {e}")
+        return False
+
+    reader = writer = None
+    try:
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
+
+        reader, writer = await asyncio.open_connection(host, port)
+        # 1) сервер шлёт приветствие
+        _ = await _readline_text(reader)
+        # 2) отправляем токен
+        writer.write(f"{token}\n".encode("utf-8"))
+        await writer.drain()
+        # 3) ответ — JSON-объект при успехе, 'null' при неверном токене
+        response = await _readline_text(reader)
+
+        try:
+            payload = json.loads(response) if response else None
+        except json.JSONDecodeError:
+            payload = None
+
+        if not payload:
+            print("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+            return False
+
+        nickname = payload.get("nickname", "<unknown>")
+        print(f"Выполнена авторизация. Пользователь {nickname}.")
+        if status_queue:
+            await status_queue.put(gui.NicknameReceived(nickname))
+            await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
+        return True
+
+    finally:
+        if writer:
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
+
 
 async def main():
     args = parse_args()
@@ -172,14 +240,15 @@ async def main():
     reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_updates_queue))
     saver_task = asyncio.create_task(save_messages(history_path, save_queue))
     sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, status_updates_queue))
+    auth_task = asyncio.create_task(authorise_and_report(args.host, args.send_port, args.token_file, status_updates_queue))
 
     try:
-        await asyncio.gather(gui_task, reader_task, saver_task, sender_task)
+        await asyncio.gather(gui_task, reader_task, saver_task, sender_task, auth_task)
     except gui.TkAppClosed:
-        for t in (reader_task, saver_task, sender_task):
+        for t in (reader_task, saver_task, sender_task, auth_task):
             t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reader_task, saver_task, sender_task)
+            await asyncio.gather(reader_task, saver_task, sender_task, auth_task)
 
 
 if __name__ == "__main__":

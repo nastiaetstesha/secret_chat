@@ -129,3 +129,10 @@ python main.py --host minechat.dvmn.org --port 5000 --send-port 5050 \
 python main.py --host minechat.dvmn.org --port 5000
 
 python main.py --host minechat.dvmn.org --port 5000 --history ~/chat_history.txt
+
+python main.py \
+  --host minechat.dvmn.org \
+  --port 5000 \
+  --send-port 5050 \
+  --history ~/chat_history.txt \
+  --token-file ./minechat_token.json
