@@ -124,3 +124,6 @@ python3 send-minechat-auth.py --log-level INFO -m 'Меньше логов'
 
 python main.py --host minechat.dvmn.org --port 5000 --send-port 5050 \
   --token-file ~/minechat_token.json --log-level INFO
+
+
+python main.py --host minechat.dvmn.org --port 5000

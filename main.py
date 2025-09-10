@@ -1,7 +1,4 @@
 import asyncio
-import time
-import json
-import os
 import contextlib
 import logging
 
@@ -11,80 +8,82 @@ from utils import (
     setup_logging,
     DEFAULT_HOST,
     DEFAULT_LISTEN_PORT,
-    DEFAULT_SEND_PORT,
-    DEFAULT_TOKEN_FILE,
-    # HAS_CAP,
+    RECONNECT_DELAY_START,
+    RECONNECT_DELAY_MAX,
 )
 
 logger = logging.getLogger("runner")
 
 
 def parse_args():
-    parser = build_parser(
-        "Run minechat GUI with configurable settings.",
+    return build_parser(
+        "Run minechat GUI that listens chat messages.",
         DEFAULT_HOST,
         DEFAULT_LISTEN_PORT,
-    )
-    parser.add_argument(
-        "--send-port",
-        type=int,
-        default=int(os.getenv("MINECHAT_SEND_PORT", DEFAULT_SEND_PORT)),
-        help="Порт для отправки сообщений (ENV: MINECHAT_SEND_PORT)",
-        )
-    parser.add_argument(
-        "--token-file",
-        default=os.getenv("MINECHAT_TOKEN_FILE", DEFAULT_TOKEN_FILE),
-        help="Путь к файлу токена (ENV: MINECHAT_TOKEN_FILE)",
-        )
-    return parser.parse_args()
+    ).parse_args()
 
 
-async def generate_msgs(messages_queue: asyncio.Queue):
-    """Каждую секунду добавляет тестовое сообщение с текущим Unix timestamp."""
+async def read_msgs(host: str, port: int, queue: asyncio.Queue):
+    """
+    Подключается к серверу и непрерывно читает чат.
+    Каждую полученную строку помещает в messages_queue.
+    Умеет переподключаться с экспоненциальной паузой.
+    """
+    delay = RECONNECT_DELAY_START
+
     while True:
-        await messages_queue.put(f"Ping {int(time.time())}")
-        await asyncio.sleep(1)
+        reader = writer = None
+        try:
+            reader, writer = await asyncio.open_connection(host, port)
+            logger.info("Подключились к %s:%s", host, port)
+            delay = RECONNECT_DELAY_START
+
+            while True:
+                line = await reader.readline()
+                if not line:
+                    logger.info("Сервер закрыл соединение")
+                    break
+                text = line.decode("utf-8", errors="replace").rstrip("\n")
+                await queue.put(text)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("Ошибка чтения: %s", e)
+        finally:
+            if writer:
+                with contextlib.suppress(Exception):
+                    writer.close()
+                    await writer.wait_closed()
+
+        logger.info("Повторное подключение через %s с", delay)
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, RECONNECT_DELAY_MAX)
 
 
 async def main():
     args = parse_args()
     setup_logging(args.log_level)
 
-    token = None
-    token_path = os.path.expanduser(args.token_file)
-    if os.path.exists(token_path):
-        try:
-            with open(token_path, encoding="utf-8") as f:
-                token = json.load(f).get("account_hash")
-        except Exception as e:
-            logger.warning("Не удалось прочитать токен из %s: %s", token_path, e)
-
-    logger.info(
-        "Config: host=%s listen_port=%s send_port=%s token_file=%s token=%s",
-        args.host,
-        args.port,
-        args.send_port,
-        args.token_file,
-        "present" if token else "absent",
-    )
-
     messages_queue = asyncio.Queue()
     sending_queue = asyncio.Queue()
     status_updates_queue = asyncio.Queue()
 
-    await messages_queue.put("Иван: Привет всем в этом чатике!")
+    await messages_queue.put("GUI: подключаюсь к чату…")
 
     gui_task = asyncio.create_task(
         gui.draw(messages_queue, sending_queue, status_updates_queue)
     )
-    gen_task = asyncio.create_task(generate_msgs(messages_queue))
+    reader_task = asyncio.create_task(
+        read_msgs(args.host, args.port, messages_queue)
+    )
 
     try:
-        await asyncio.gather(gui_task, gen_task)
+        await asyncio.gather(gui_task, reader_task)
     except gui.TkAppClosed:
-        gen_task.cancel()
+        reader_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await gen_task
+            await reader_task
 
 
 if __name__ == "__main__":
