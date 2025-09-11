@@ -4,6 +4,7 @@ import json
 import os
 import gui
 from core.exceptions import InvalidToken
+from core.watchdog import WD
 
 
 async def _readline_text(reader: asyncio.StreamReader) -> str:
@@ -24,34 +25,44 @@ def _load_token(token_file: str) -> str:
         raise InvalidToken(f"Не удалось прочитать токен: {e}")
 
 
-async def authorise_or_raise(host: str, port: int, token_file: str, status_queue=None) -> str:
+async def authorise_or_raise(
+    host: str,
+    port: int,
+    token_file: str,
+    status_queue=None,
+    watchdog_queue: asyncio.Queue | None = None,
+) -> str:
+    
     """Возвращает nickname при успехе, иначе InvalidToken."""
     token = _load_token(token_file)
     reader = writer = None
     try:
-        # if status_queue:
-        #     await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
-
         reader, writer = await asyncio.open_connection(host, port)
+
         _ = await _readline_text(reader)
+        if watchdog_queue:
+            await watchdog_queue.put(WD.PROMPT)
+
         writer.write(f"{token}\n".encode("utf-8"))
         await writer.drain()
-        response = await _readline_text(reader)
 
+        response = await _readline_text(reader)
         try:
             payload = json.loads(response) if response else None
         except json.JSONDecodeError:
             payload = None
 
         if not payload:
-            if status_queue:
-                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
             raise InvalidToken("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
 
         nickname = payload.get("nickname", "<unknown>")
+
         if status_queue:
             await status_queue.put(gui.NicknameReceived(nickname))
-            # await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
+
+        if watchdog_queue:
+            await watchdog_queue.put(WD.AUTH_OK)
+
         return nickname
 
     finally:
@@ -59,6 +70,4 @@ async def authorise_or_raise(host: str, port: int, token_file: str, status_queue
             with contextlib.suppress(Exception):
                 writer.close()
                 await writer.wait_closed()
-        # if status_queue:
-        #     await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
 

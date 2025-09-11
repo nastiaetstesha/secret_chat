@@ -11,15 +11,20 @@ from core.reader import read_msgs
 from core.sender import send_msgs
 from core.auth import authorise_or_raise
 from core.exceptions import InvalidToken
+from core.watchdog import watch_for_connection
 
 
 logger = logging.getLogger("app")
 
 
 async def run_app():
+    import inspect
+    print('read_msgs from', read_msgs.__module__, inspect.signature(read_msgs))
+
     args = parse_args()
     setup_logging(args.log_level)
 
+    watchdog_queue = asyncio.Queue()
     messages_queue = asyncio.Queue()
     sending_queue = asyncio.Queue()
     status_queue = asyncio.Queue()
@@ -27,26 +32,35 @@ async def run_app():
 
     history_path = expand_path_and_mkdirs(args.history)
     await preload_history(history_path, messages_queue)
-
+    # 
+    wd_handler = logging.StreamHandler()
+    wd_handler.setFormatter(logging.Formatter("%(message)s"))
+    watchdog_logger = logging.getLogger("watchdog")
+    watchdog_logger.propagate = False
+    watchdog_logger.setLevel(logging.INFO)
+    watchdog_logger.handlers = [wd_handler]
+    # 
     gui_task = asyncio.create_task(gui.draw(messages_queue, sending_queue, status_queue))
-    reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_queue))
+    reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_queue, watchdog_queue))
     saver_task = asyncio.create_task(save_messages(history_path, save_queue))
-    auth_task = asyncio.create_task(authorise_or_raise(args.host, args.send_port, args.token_file, status_queue))
-    sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, args.token_file, status_queue))
+    auth_task = asyncio.create_task(authorise_or_raise(args.host, args.send_port, args.token_file, status_queue, watchdog_queue))
+    sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, args.token_file, status_queue, watchdog_queue))
+    watchdog_task = asyncio.create_task(watch_for_connection(watchdog_queue))
 
     try:
-        await asyncio.gather(gui_task, reader_task, saver_task, auth_task, sender_task)
+        await asyncio.gather(gui_task, reader_task, saver_task, auth_task, sender_task, watchdog_task)
     except InvalidToken as e:
         try:
             messagebox.showerror("Ошибка авторизации", str(e))
         except Exception:
             print(f"Ошибка авторизации: {e}", flush=True)
-        for t in (reader_task, saver_task, sender_task, gui_task):
+        for t in (reader_task, saver_task, sender_task, gui_task, watchdog_task, auth_task):
             t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(reader_task, saver_task, sender_task, gui_task, return_exceptions=True)
+            await asyncio.gather(reader_task, saver_task, sender_task, gui_task, watchdog_task, auth_task, return_exceptions=True)
+
     except gui.TkAppClosed:
-        for t in (reader_task, saver_task, sender_task, auth_task):
+        for t in (reader_task, saver_task, sender_task, auth_task, watchdog_task):
             t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.gather(reader_task, saver_task, sender_task, auth_task, return_exceptions=True)

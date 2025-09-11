@@ -7,6 +7,7 @@ import gui
 from utils import RECONNECT_DELAY_START, RECONNECT_DELAY_MAX
 from minechat_api import authorise as mc_authorise, submit_message as mc_submit
 from core.exceptions import InvalidToken
+from core.watchdog import WD
 
 
 logger = logging.getLogger("sender")
@@ -23,7 +24,7 @@ def _read_token(token_file: str) -> str:
         raise InvalidToken(f"Не удалось прочитать токен: {e}")
 
 
-async def send_msgs(host, port, sending_queue, token_file, status_queue=None):
+async def send_msgs(host, port, sending_queue, token_file, status_queue=None, watchdog_queue=None):
     token = _read_token(token_file)
     delay = RECONNECT_DELAY_START
 
@@ -49,6 +50,8 @@ async def send_msgs(host, port, sending_queue, token_file, status_queue=None):
                 if not text:
                     continue
                 await mc_submit(writer, text)
+                if watchdog_queue:
+                    await watchdog_queue.put(WD.MSG_SENT)
 
         except asyncio.CancelledError:
             if status_queue:

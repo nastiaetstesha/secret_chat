@@ -3,11 +3,12 @@ import contextlib
 import logging
 import gui
 from utils import RECONNECT_DELAY_START, RECONNECT_DELAY_MAX
+from core.watchdog import WD
 
 logger = logging.getLogger("reader")
 
 
-async def read_msgs(host, port, gui_queue, save_queue, status_queue=None):
+async def read_msgs(host, port, gui_queue, save_queue, status_queue=None, watchdog_queue=None):
     delay = RECONNECT_DELAY_START
     while True:
         reader = writer = None
@@ -28,6 +29,8 @@ async def read_msgs(host, port, gui_queue, save_queue, status_queue=None):
                 text = line.decode('utf-8', errors='replace').rstrip('\n')
                 await gui_queue.put(text)
                 await save_queue.put(text)
+                if watchdog_queue:
+                    await watchdog_queue.put(WD.CHAT_RX)
 
         except asyncio.CancelledError:
             raise
