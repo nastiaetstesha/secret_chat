@@ -13,6 +13,9 @@ class WD(str, Enum):
     CHAT_RX = "New message in chat"
     MSG_SENT = "Message sent"
 
+    def __str__(self) -> str:
+        return str(self.value)
+
 
 async def watch_for_connection(queue: asyncio.Queue):
     """
@@ -22,4 +25,6 @@ async def watch_for_connection(queue: asyncio.Queue):
     while True:
         event = await queue.get()
         ts = int(time.time())
-        watchdog_logger.info(f"[{ts}] Connection is alive. {event}")
+        # WD -> берем .value, иначе просто str(event)
+        msg = event.value if isinstance(event, WD) else str(event)
+        watchdog_logger.info(f"[{ts}] Connection is alive. {msg}")
