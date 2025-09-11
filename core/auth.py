@@ -1,4 +1,3 @@
-# core/auth.py
 import asyncio
 import contextlib
 import json
@@ -30,14 +29,14 @@ async def authorise_or_raise(host: str, port: int, token_file: str, status_queue
     token = _load_token(token_file)
     reader = writer = None
     try:
-        if status_queue:
-            await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
+        # if status_queue:
+        #     await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
 
         reader, writer = await asyncio.open_connection(host, port)
-        _ = await _readline_text(reader)            # приветствие
-        writer.write(f"{token}\n".encode("utf-8"))  # токен
+        _ = await _readline_text(reader)
+        writer.write(f"{token}\n".encode("utf-8"))
         await writer.drain()
-        response = await _readline_text(reader)     # JSON или 'null'
+        response = await _readline_text(reader)
 
         try:
             payload = json.loads(response) if response else None
@@ -52,7 +51,7 @@ async def authorise_or_raise(host: str, port: int, token_file: str, status_queue
         nickname = payload.get("nickname", "<unknown>")
         if status_queue:
             await status_queue.put(gui.NicknameReceived(nickname))
-            await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
+            # await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
         return nickname
 
     finally:
@@ -60,3 +59,6 @@ async def authorise_or_raise(host: str, port: int, token_file: str, status_queue
             with contextlib.suppress(Exception):
                 writer.close()
                 await writer.wait_closed()
+        # if status_queue:
+        #     await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+

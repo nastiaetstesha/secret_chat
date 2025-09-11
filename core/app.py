@@ -1,4 +1,3 @@
-# core/app.py
 import asyncio
 import contextlib
 import logging
@@ -32,7 +31,6 @@ async def run_app():
     gui_task = asyncio.create_task(gui.draw(messages_queue, sending_queue, status_queue))
     reader_task = asyncio.create_task(read_msgs(args.host, args.port, messages_queue, save_queue, status_queue))
     saver_task = asyncio.create_task(save_messages(history_path, save_queue))
-
     auth_task = asyncio.create_task(authorise_or_raise(args.host, args.send_port, args.token_file, status_queue))
     sender_task = asyncio.create_task(send_msgs(args.host, args.send_port, sending_queue, args.token_file, status_queue))
 

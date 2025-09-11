@@ -62,22 +62,58 @@ async def update_conversation_history(panel, messages_queue):
         panel['state'] = 'disabled'
 
 
+# async def update_status_panel(status_labels, status_updates_queue):
+#     nickname_label, read_label, write_label = status_labels
+
+#     read_label['text'] = f'Чтение: нет соединения'
+#     write_label['text'] = f'Отправка: нет соединения'
+#     nickname_label['text'] = f'Имя пользователя: неизвестно'
+
+#     while True:
+#         msg = await status_updates_queue.get()
+#         if isinstance(msg, ReadConnectionStateChanged):
+#             read_label['text'] = f'Чтение: {msg}'
+
+#         if isinstance(msg, SendingConnectionStateChanged):
+#             write_label['text'] = f'Отправка: {msg}'
+
+#         if isinstance(msg, NicknameReceived):
+#             nickname_label['text'] = f'Имя пользователя: {msg.nickname}'
 async def update_status_panel(status_labels, status_updates_queue):
     nickname_label, read_label, write_label = status_labels
 
-    read_label['text'] = f'Чтение: нет соединения'
-    write_label['text'] = f'Отправка: нет соединения'
-    nickname_label['text'] = f'Имя пользователя: неизвестно'
+    def set_read(state_text, color='grey'):
+        read_label['text'] = f'Чтение: {state_text}'
+        read_label['fg'] = color
+
+    def set_write(state_text, color='grey'):
+        write_label['text'] = f'Отправка: {state_text}'
+        write_label['fg'] = color
+
+    nickname_label['text'] = 'Имя пользователя: неизвестно'
+    set_read('нет соединения', 'grey')
+    set_write('нет соединения', 'grey')
 
     while True:
         msg = await status_updates_queue.get()
+
         if isinstance(msg, ReadConnectionStateChanged):
-            read_label['text'] = f'Чтение: {msg}'
+            if msg is ReadConnectionStateChanged.INITIATED:
+                set_read(str(msg), 'orange')
+            elif msg is ReadConnectionStateChanged.ESTABLISHED:
+                set_read(str(msg), 'green')
+            elif msg is ReadConnectionStateChanged.CLOSED:
+                set_read(str(msg), 'red')
 
-        if isinstance(msg, SendingConnectionStateChanged):
-            write_label['text'] = f'Отправка: {msg}'
+        elif isinstance(msg, SendingConnectionStateChanged):
+            if msg is SendingConnectionStateChanged.INITIATED:
+                set_write(str(msg), 'orange')
+            elif msg is SendingConnectionStateChanged.ESTABLISHED:
+                set_write(str(msg), 'green')
+            elif msg is SendingConnectionStateChanged.CLOSED:
+                set_write(str(msg), 'red')
 
-        if isinstance(msg, NicknameReceived):
+        elif isinstance(msg, NicknameReceived):
             nickname_label['text'] = f'Имя пользователя: {msg.nickname}'
 
 

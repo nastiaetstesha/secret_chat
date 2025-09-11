@@ -23,7 +23,7 @@ def _read_token(token_file: str) -> str:
         raise InvalidToken(f"Не удалось прочитать токен: {e}")
 
 
-async def send_msgs(host: str, port: int, sending_queue, token_file: str, status_queue=None):
+async def send_msgs(host, port, sending_queue, token_file, status_queue=None):
     token = _read_token(token_file)
     delay = RECONNECT_DELAY_START
 
@@ -42,31 +42,33 @@ async def send_msgs(host: str, port: int, sending_queue, token_file: str, status
 
             if status_queue:
                 await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
-            delay = RECONNECT_DELAY_START
 
+            delay = RECONNECT_DELAY_START
             while True:
-                text = (await sending_queue.get() or "").strip()
+                text = (await sending_queue.get() or '').strip()
                 if not text:
                     continue
                 await mc_submit(writer, text)
-                logger.info("Отправлено: %r", text)
 
         except asyncio.CancelledError:
             if status_queue:
                 await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
             raise
         except InvalidToken:
-            # фатальная ошибка
+            # всплывёт в app.run для messagebox и выхода
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
             raise
-        except Exception as e:
-            logger.exception("Ошибка отправки: %s", e)
+        except Exception:
+            # сеть упала — сообщаем и пробуем переподключиться
+            if status_queue:
+                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
         finally:
             if writer:
                 with contextlib.suppress(Exception):
                     writer.close()
                     await writer.wait_closed()
-            if status_queue:
-                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
 
         await asyncio.sleep(delay)
         delay = min(delay * 2, RECONNECT_DELAY_MAX)
+
