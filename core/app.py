@@ -1,4 +1,5 @@
 import asyncio
+import anyio
 import contextlib
 import logging
 from tkinter import messagebox
@@ -37,39 +38,35 @@ async def run_app():
     wlog.setLevel(logging.INFO)
     wlog.handlers = [wd_handler]
 
-    gui_task = asyncio.create_task(gui.draw(messages_queue, sending_queue, status_queue))
-    saver_task = asyncio.create_task(save_messages(history_path, save_queue))
-
-    auth_task = asyncio.create_task(authorise_or_raise(args.host, args.send_port, args.token_file, status_queue, watchdog_queue))
-
-    conn_task = asyncio.create_task(handle_connection(
-        host=args.host,
-        listen_port=args.port,
-        send_port=args.send_port,
-        token_file=args.token_file,
-        gui_queue=messages_queue,
-        save_queue=save_queue,
-        sending_queue=sending_queue,
-        status_queue=status_queue,
-        watchdog_queue=watchdog_queue,
-        watchdog_timeout=5.0,
-        watchdog_alarm_after=5,
-        reconnect_delay=1.0,
-    ))
-
     try:
-        await asyncio.gather(gui_task, saver_task, auth_task, conn_task)
-    except InvalidToken as e:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(gui.draw, messages_queue, sending_queue, status_queue)
+
+            tg.start_soon(save_messages, history_path, save_queue)
+
+            tg.start_soon(authorise_or_raise, args.host, args.send_port, args.token_file,
+                          status_queue, watchdog_queue)
+
+            tg.start_soon(
+                handle_connection, args.host,
+                args.port,
+                args.send_port,
+                args.token_file,
+                messages_queue,
+                save_queue,
+                sending_queue,
+                status_queue,
+                watchdog_queue,
+                5.0,
+                5,
+                1.0,
+            )
+    except* InvalidToken as eg:
+
         try:
-            messagebox.showerror("Ошибка авторизации", str(e))
+            messagebox.showerror("Ошибка авторизации", str(eg.exceptions[0] if eg.exceptions else "Invalid token"))
         except Exception:
-            print(f"Ошибка авторизации: {e}", flush=True)
-        for t in (conn_task, saver_task, gui_task, auth_task):
-            t.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(conn_task, saver_task, gui_task, auth_task, return_exceptions=True)
-    except gui.TkAppClosed:
-        for t in (conn_task, saver_task, auth_task):
-            t.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(conn_task, saver_task, auth_task, return_exceptions=True)
+            print(f"Ошибка авторизации: {eg}", flush=True)
+
+    except* gui.TkAppClosed:
+        pass

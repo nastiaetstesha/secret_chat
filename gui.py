@@ -1,3 +1,4 @@
+import anyio
 import tkinter as tk
 import asyncio
 from tkinter.scrolledtext import ScrolledText
@@ -62,23 +63,6 @@ async def update_conversation_history(panel, messages_queue):
         panel['state'] = 'disabled'
 
 
-# async def update_status_panel(status_labels, status_updates_queue):
-#     nickname_label, read_label, write_label = status_labels
-
-#     read_label['text'] = f'Чтение: нет соединения'
-#     write_label['text'] = f'Отправка: нет соединения'
-#     nickname_label['text'] = f'Имя пользователя: неизвестно'
-
-#     while True:
-#         msg = await status_updates_queue.get()
-#         if isinstance(msg, ReadConnectionStateChanged):
-#             read_label['text'] = f'Чтение: {msg}'
-
-#         if isinstance(msg, SendingConnectionStateChanged):
-#             write_label['text'] = f'Отправка: {msg}'
-
-#         if isinstance(msg, NicknameReceived):
-#             nickname_label['text'] = f'Имя пользователя: {msg.nickname}'
 async def update_status_panel(status_labels, status_updates_queue):
     nickname_label, read_label, write_label = status_labels
 
@@ -162,8 +146,7 @@ async def draw(messages_queue, sending_queue, status_updates_queue):
     conversation_panel = ScrolledText(root_frame, wrap='none')
     conversation_panel.pack(side="top", fill="both", expand=True)
 
-    await asyncio.gather(
-        update_tk(root_frame),
-        update_conversation_history(conversation_panel, messages_queue),
-        update_status_panel(status_labels, status_updates_queue)
-    )
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(update_tk, root_frame)
+        tg.start_soon(update_conversation_history, conversation_panel, messages_queue)
+        tg.start_soon(update_status_panel, status_labels, status_updates_queue)

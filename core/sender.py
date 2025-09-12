@@ -16,7 +16,7 @@ from core.watchdog import WD
 logger = logging.getLogger("sender")
 
 
-HEARTBEAT_IDLE_S = 5.0  # если нет сообщений столько секунд — шлём пинг
+HEARTBEAT_IDLE_S = 5.0
 PING_ACK_TIMEOUT_S = 2.0
 
 

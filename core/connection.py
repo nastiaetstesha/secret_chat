@@ -1,3 +1,4 @@
+import anyio
 import asyncio
 import anyio
 import logging
@@ -55,7 +56,6 @@ async def handle_connection(
                     reconnect_delay,
                 )
                 await asyncio.sleep(reconnect_delay)
-                # continue
 
         except anyio.get_cancelled_exc_class():
             raise
