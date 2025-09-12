@@ -52,8 +52,8 @@ async def run_app():
         sending_queue=sending_queue,
         status_queue=status_queue,
         watchdog_queue=watchdog_queue,
-        watchdog_timeout=1.0,
-        watchdog_alarm_after=10,
+        watchdog_timeout=5.0,
+        watchdog_alarm_after=5,
         reconnect_delay=1.0,
     ))
 
