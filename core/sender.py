@@ -7,7 +7,6 @@ import os
 import logging
 import gui
 
-from utils import RECONNECT_DELAY_START, RECONNECT_DELAY_MAX
 from minechat_api import authorise as mc_authorise, submit_message as mc_submit
 from core.exceptions import InvalidToken
 from core.watchdog import WD

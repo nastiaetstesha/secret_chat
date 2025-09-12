@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 import logging
 import gui
-from utils import RECONNECT_DELAY_START, RECONNECT_DELAY_MAX
 from core.watchdog import WD
 
 logger = logging.getLogger("reader")
