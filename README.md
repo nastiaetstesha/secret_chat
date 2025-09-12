@@ -121,18 +121,18 @@ python3 send-minechat-auth.py --token-file ./secrets/token.json -m 'Секрет
 python3 send-minechat-auth.py --host minechat.dvmn.org --port 5050 -m 'Через другой порт'
 python3 send-minechat-auth.py --log-level INFO -m 'Меньше логов'
 ```
+## Запуск чата с интерфейсом
 
-python main.py --host minechat.dvmn.org --port 5000 --send-port 5050 \
-  --token-file ~/minechat_token.json --log-level INFO
+### 1. Регистрация 
+`python register_gui.py`
+![alt text](image.png)
 
-
-python main.py --host minechat.dvmn.org --port 5000
-
-python main.py --host minechat.dvmn.org --port 5000 --history ~/chat_history.txt
-
+### 2. Запуск чата
+```
 python main.py \
   --host minechat.dvmn.org \
   --port 5000 \
   --send-port 5050 \
   --history ~/chat_history.txt \
   --token-file ./minechat_token.json
+```
