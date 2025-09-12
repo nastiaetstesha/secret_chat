@@ -25,53 +25,53 @@ def _read_token(token_file: str) -> str:
 
 
 async def send_msgs(host, port, sending_queue, token_file, status_queue=None, watchdog_queue=None):
+    """
+    ОДНА сессия. Авторизация + отправка.
+    На любой сетевой сбой бросает ConnectionError (для внешнего перезапуска).
+    """
     token = _read_token(token_file)
-    delay = RECONNECT_DELAY_START
+    reader = writer = None
+    try:
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
 
-    while True:
-        reader = writer = None
-        try:
-            if status_queue:
-                await status_queue.put(gui.SendingConnectionStateChanged.INITIATED)
-
-            reader, writer = await asyncio.open_connection(host, port)
-            ok = await mc_authorise(reader, writer, token)
-            if not ok:
-                if status_queue:
-                    await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
-                raise InvalidToken("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
-
-            if status_queue:
-                await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
-
-            delay = RECONNECT_DELAY_START
-            while True:
-                text = (await sending_queue.get() or '').strip()
-                if not text:
-                    continue
-                await mc_submit(writer, text)
-                if watchdog_queue:
-                    await watchdog_queue.put(WD.MSG_SENT)
-
-        except asyncio.CancelledError:
+        reader, writer = await asyncio.open_connection(host, port)
+        ok = await mc_authorise(reader, writer, token)
+        if not ok:
             if status_queue:
                 await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
-            raise
-        except InvalidToken:
-            # всплывёт в app.run для messagebox и выхода
-            if status_queue:
-                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
-            raise
-        except Exception:
-            # сеть упала — сообщаем и пробуем переподключиться
-            if status_queue:
-                await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
-        finally:
-            if writer:
-                with contextlib.suppress(Exception):
-                    writer.close()
-                    await writer.wait_closed()
+            raise InvalidToken("Неизвестный токен. Проверьте его или зарегистрируйте заново.")
 
-        await asyncio.sleep(delay)
-        delay = min(delay * 2, RECONNECT_DELAY_MAX)
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.ESTABLISHED)
+        if watchdog_queue:
+            await watchdog_queue.put(WD.SEND_OK)
+
+        while True:
+            text = (await sending_queue.get() or '').strip()
+            if not text:
+                continue
+            await mc_submit(writer, text)
+            if watchdog_queue:
+                await watchdog_queue.put(WD.MSG_SENT)
+
+    except asyncio.CancelledError:
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+        raise
+    except InvalidToken:
+        # фатально — пусть наружу
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+        raise
+    except Exception as e:
+        logger.debug("sender error: %s", e)
+        if status_queue:
+            await status_queue.put(gui.SendingConnectionStateChanged.CLOSED)
+        raise ConnectionError(str(e))
+    finally:
+        if writer:
+            with contextlib.suppress(Exception):
+                writer.close()
+                await writer.wait_closed()
 
