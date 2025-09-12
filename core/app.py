@@ -61,12 +61,15 @@ async def run_app():
                 5,
                 1.0,
             )
-    except* InvalidToken as eg:
-
-        try:
-            messagebox.showerror("Ошибка авторизации", str(eg.exceptions[0] if eg.exceptions else "Invalid token"))
-        except Exception:
-            print(f"Ошибка авторизации: {eg}", flush=True)
-
     except* gui.TkAppClosed:
         pass
+
+    except* asyncio.CancelledError:
+        pass
+
+    except* InvalidToken as eg:
+        try:
+            msg = str(eg.exceptions[0]) if eg.exceptions else "Invalid token"
+            messagebox.showerror("Ошибка авторизации", msg)
+        finally:
+            pass

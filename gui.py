@@ -51,16 +51,19 @@ async def update_tk(root_frame, interval=1 / 120):
 async def update_conversation_history(panel, messages_queue):
     while True:
         msg = await messages_queue.get()
+        try:
+            panel['state'] = 'normal'
+            if panel.index('end-1c') != '1.0':
+                panel.insert('end', '\n')
+            panel.insert('end', msg)
+            # TODO сделать промотку умной, чтобы не мешала просматривать историю сообщений
+            # ScrolledText.frame
+            # ScrolledText.vbar
+            panel.yview(tk.END)
+            panel['state'] = 'disabled'
 
-        panel['state'] = 'normal'
-        if panel.index('end-1c') != '1.0':
-            panel.insert('end', '\n')
-        panel.insert('end', msg)
-        # TODO сделать промотку умной, чтобы не мешала просматривать историю сообщений
-        # ScrolledText.frame
-        # ScrolledText.vbar
-        panel.yview(tk.END)
-        panel['state'] = 'disabled'
+        except tk.TclError:
+            raise TkAppClosed()
 
 
 async def update_status_panel(status_labels, status_updates_queue):
@@ -80,25 +83,27 @@ async def update_status_panel(status_labels, status_updates_queue):
 
     while True:
         msg = await status_updates_queue.get()
+        try:
+            if isinstance(msg, ReadConnectionStateChanged):
+                if msg is ReadConnectionStateChanged.INITIATED:
+                    set_read(str(msg), 'orange')
+                elif msg is ReadConnectionStateChanged.ESTABLISHED:
+                    set_read(str(msg), 'green')
+                elif msg is ReadConnectionStateChanged.CLOSED:
+                    set_read(str(msg), 'red')
 
-        if isinstance(msg, ReadConnectionStateChanged):
-            if msg is ReadConnectionStateChanged.INITIATED:
-                set_read(str(msg), 'orange')
-            elif msg is ReadConnectionStateChanged.ESTABLISHED:
-                set_read(str(msg), 'green')
-            elif msg is ReadConnectionStateChanged.CLOSED:
-                set_read(str(msg), 'red')
+            elif isinstance(msg, SendingConnectionStateChanged):
+                if msg is SendingConnectionStateChanged.INITIATED:
+                    set_write(str(msg), 'orange')
+                elif msg is SendingConnectionStateChanged.ESTABLISHED:
+                    set_write(str(msg), 'green')
+                elif msg is SendingConnectionStateChanged.CLOSED:
+                    set_write(str(msg), 'red')
 
-        elif isinstance(msg, SendingConnectionStateChanged):
-            if msg is SendingConnectionStateChanged.INITIATED:
-                set_write(str(msg), 'orange')
-            elif msg is SendingConnectionStateChanged.ESTABLISHED:
-                set_write(str(msg), 'green')
-            elif msg is SendingConnectionStateChanged.CLOSED:
-                set_write(str(msg), 'red')
-
-        elif isinstance(msg, NicknameReceived):
-            nickname_label['text'] = f'Имя пользователя: {msg.nickname}'
+            elif isinstance(msg, NicknameReceived):
+                nickname_label['text'] = f'Имя пользователя: {msg.nickname}'
+        except tk.TclError:
+            raise TkAppClosed()
 
 
 def create_status_panel(root_frame):
